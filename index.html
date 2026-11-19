@@ -7,13 +7,13 @@
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjRkY0QjNFIiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI+PGNpcmNsZSBjeD0iMTUiIGN5PSI0LjUiIHI9IjIiLz48cGF0aCBkPSJNMTMuNSA4IDEwLjUgMTNsMy41IDIuNS0xIDUuNU0xMC41IDEzbC0zIDRINE03IDEwbDQtMi41IDIuNS41IDIuNSAzaDMiLz48L3N2Zz4=">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 /* Layout: picker bar on top · activity list left · detail right (tiles, then a 3-up chart grid) */
 :root{
   --bg:#F6F4F3; --surface:#FFFFFF; --ink:#1C1918; --muted:#6F6866; --line:#E7E1DE; --accent:#FF4B3E; --accent-soft:#FFE7E4;
   --water:#D6E4EE; --land:#F4F1EE; --z1:#9AA3AD; --z2:#5B9BD5; --z3:#3FAE7C; --z4:#E3B23C; --z5:#EE8A3A; --z6:#E5484D;
-  --f-display:"Fraunces",Georgia,serif; --f-body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+  --f-display:var(--f-body); --f-body:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){
@@ -28,7 +28,7 @@ body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--f-body);-webkit-
 h1,h2,h3{margin:0;text-wrap:balance}
 h1{font:600 26px/1.15 var(--f-display);letter-spacing:-.01em;display:flex;align-items:baseline;gap:.25em;flex-wrap:wrap}
 .srcpick{position:relative;display:inline-flex;align-items:center}
-.srcpick select{appearance:none;-webkit-appearance:none;font:inherit;letter-spacing:inherit;color:var(--accent);background:transparent;border:0;border-bottom:2px solid var(--accent);border-radius:0;padding:0 1.05em 1px 0;cursor:pointer;text-align:right;text-align-last:right}
+.srcpick select{appearance:none;-webkit-appearance:none;font:inherit;letter-spacing:inherit;color:var(--accent);background:transparent;border:0;border-radius:0;padding:0 1.05em 1px 0;cursor:pointer;text-align:right;text-align-last:right}
 .srcpick select:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .srcpick select option{font:500 15px var(--f-body);color:var(--ink);background:var(--surface)}
 .srcpick svg{position:absolute;right:0;width:.8em;height:.8em;color:var(--accent);pointer-events:none}
@@ -76,7 +76,7 @@ button:focus-visible,.act:focus-visible{outline:2px solid var(--accent);outline-
 .empty{padding:24px 14px;color:var(--muted)}
 
 .detail{display:flex;flex-direction:column;gap:16px;min-width:0}
-.dhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;padding-bottom:10px;border-bottom:3px solid var(--accent)}
+.dhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:8px;padding-bottom:10px;border-bottom:2px solid var(--accent)}
 .dhead .sub{color:var(--muted);font-size:13px}
 .tiles{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:10px}
 .tile{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
