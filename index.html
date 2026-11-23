@@ -836,7 +836,7 @@ window.ACTIVITY_DATA = window.ACTIVITY_DATA || {};
 const SOURCES = {garmin:"Garmin", strava:"Strava", zepp:"Zepp"};
 const SRC_KEY = "activityViewer.source";
 
-const TYPES = {1:{name:"Running",cls:"run",pace:true},6:{name:"Walking",cls:"walk",pace:true},9:{name:"Cycling",cls:"bike",pace:false},16:{name:"Free training",cls:"free",pace:false}};
+const TYPES = {1:{name:"Running",cls:"run",pace:true},6:{name:"Walking",cls:"walk",pace:true},9:{name:"Cycling",cls:"bike",pace:false},16:{name:"Free training",cls:"free",pace:false},20:{name:"Swimming",cls:"swim",pace:true,per:100},21:{name:"Cardio",cls:"cardio",pace:false},22:{name:"Pilates",cls:"pilates",pace:false}};
 const ZONES = [
   {n:"Relaxed",  lo:40,  hi:85,  c:"var(--z1)"},
   {n:"Light",    lo:86,  hi:102, c:"var(--z2)"},
@@ -849,6 +849,9 @@ const ICONS={
   1:'<circle cx="15" cy="4.5" r="2"/><path d="M13.5 8 10.5 13l3.5 2.5-1 5.5M10.5 13l-3 4H4M7 10l4-2.5 2.5.5 2.5 3h3"/>',
   6:'<circle cx="13" cy="4.2" r="2"/><path d="M12.5 7.5l-1 6-2.5 7.5M11.5 13.5l2.5 3.5.5 4M9 11l3.3-3L15 11"/>',
   16:'<path d="M3 12h18M6.5 8v8M17.5 8v8M4 10v4M20 10v4"/>',
+  20:'<circle cx="16" cy="6" r="2"/><path d="M4 11l4.5-3 3 2.5 3-2M2 16c1.7 0 1.7 1.2 3.3 1.2S7 16 8.7 16s1.7 1.2 3.3 1.2S13.7 16 15.3 16s1.7 1.2 3.4 1.2S20.3 16 22 16"/>',
+  21:'<path d="M3 12h4l2-5 4 10 2-5h6"/>',
+  22:'<circle cx="12" cy="5" r="2"/><path d="M12 8v6M5 11l7-1 7 1M7 20l5-6 5 6"/>',
   9:'<circle cx="5.5" cy="16" r="3.5"/><circle cx="18.5" cy="16" r="3.5"/><path d="M5.5 16 9.5 9.5h5L18.5 16M9.5 9.5 12 16H5.5M8 7.5h3M14.5 9.5l1-2.5H17"/>'};
 const ICON=k=>`<svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]||'<circle cx="12" cy="12" r="8"/>'}</svg>`;
 const PIN='<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/></svg>';
@@ -856,13 +859,15 @@ const MONTHS=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov",
 const WD=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
 /* ---------- normalise records ---------- */
+const perOf=t=>(TYPES[t]&&TYPES[t].per)||1000;
 let acts = [];
 function normalise(list){
   return list.map((r,i)=>{
     const a={
       id:i, type:r.t, start:new Date(r.s), dur:r.d, dist:r.m, cal:r.c,   // r.s: local time string
-      avgPace:r.ap*1000, bestPace:r.fp>0? r.fp*1000:null,                // s/km
-      hr:r.hr || [], hasGps:!!r.trk, span:r.d,                           // hr: [[sec, bpm]]
+      avgPace:r.ap*perOf(r.t), bestPace:r.fp>0? r.fp*perOf(r.t):null,    // s per km (s per 100 m for swims)
+      pu:perOf(r.t)===100?"/100m":"/km", splitLen:perOf(r.t),
+      hr:r.hr || [], hasGps:!!(r.trk&&r.trk.la&&r.trk.la.some(v=>v!=null)), span:r.d,                           // hr: [[sec, bpm]]
       steps:r.st ?? null, gps:null, alt:null, pace:null, dstream:null, map:r.map||null
     };
     if(r.trk) attachGpx(a,r.trk);
@@ -952,7 +957,7 @@ function renderPicker(){
     ms.appendChild(b);
   });
   const ts=document.getElementById("types");ts.innerHTML="";
-  [["all","All"],...Object.keys(TYPES).map(k=>[+k,TYPES[k].name])].forEach(([k,name])=>{
+  [["all","All"],...Object.keys(TYPES).map(k=>[+k,TYPES[k].name]).filter(([k])=>acts.some(a=>a.type===k))].forEach(([k,name])=>{
     const n=k==="all"?acts.length:acts.filter(a=>a.type===k).length;
     const b=document.createElement("button");b.type="button";
     b.innerHTML=`${k==="all"?"":ICON(k)}${name}<span class="cnt">${n}</span>`;b.disabled=!n;b.setAttribute("aria-pressed",k===state.type);
@@ -1006,10 +1011,10 @@ function hrStats(a){
   return {avg:Math.round(s/w),max:mx};
 }
 function splits(a){
-  const rows=[];const n=Math.ceil(a.dist/1000-1e-6);
+  const L=a.splitLen,rows=[];const n=Math.ceil(a.dist/L-1e-6);
   for(let k=1;k<=n;k++){
-    const m0=(k-1)*1000,m1=Math.min(k*1000,a.dist),t0=timeAtDist(a,m0),t1=timeAtDist(a,m1);
-    const seg=m1-m0;const pace=(t1-t0)/(seg/1000);
+    const m0=(k-1)*L,m1=Math.min(k*L,a.dist),t0=timeAtDist(a,m0),t1=timeAtDist(a,m1);
+    const seg=m1-m0;const pace=(t1-t0)/(seg/L);
     let hs=a.hr.filter(p=>p[0]>=t0&&p[0]<t1).map(p=>p[1]);
     if(!hs.length&&a.hr.length){const mid=(t0+t1)/2;hs=[a.hr.reduce((b,p)=>Math.abs(p[0]-mid)<Math.abs(b[0]-mid)?p:b)[1]]}
     rows.push({k,seg,pace,time:t1-t0,hr:hs.length?Math.round(hs.reduce((x,y)=>x+y,0)/hs.length):null});
@@ -1085,7 +1090,7 @@ function routeSvg(host,gps,map){
 
 /* ---------- detail ---------- */
 function noGpsMsg(a,what){
-  return what==="route"?`No GPX file for this activity.`:`No altitude data.<br>This activity has no GPX file.`;
+  return what==="route"?`No GPS track for this activity.`:`No altitude data for this activity.`;
 }
 /* ---------- live OSM map (Leaflet), used only when tiles load ---------- */
 let OSM_OK=null,curMap=null;
@@ -1124,7 +1129,7 @@ function renderDetail(){
     <div class="tiles">
       ${tile("Total distance",km(a.dist),"km")}
       ${tile("Workout time",fmtDur(a.dur),"")}
-      ${noDist?tile(t.pace?"Avg pace":"Avg speed","—","","no distance recorded",true):t.pace?tile("Avg pace",fmtPace(a.avgPace),"/km",`${speed.toFixed(1)} km/h`):tile("Avg speed",speed.toFixed(1),"km/h",`${fmtPace(a.avgPace)} /km`)}
+      ${noDist?tile(t.pace?"Avg pace":"Avg speed","—","","no distance recorded",true):t.pace?tile("Avg pace",fmtPace(a.avgPace),a.pu,`${speed.toFixed(1)} km/h`):tile("Avg speed",speed.toFixed(1),"km/h",`${fmtPace(a.avgPace)} /km`)}
       ${hs?tile("Avg HR",hs.avg,"bpm",`${a.hr.length} samples`):tile("Avg HR","—","","no HR recorded",true)}
       ${hs?tile("Max HR",hs.max,"bpm"):tile("Max HR","—","","no HR recorded",true)}
       ${a.steps?tile("Avg cadence",Math.round(a.steps/(a.dur/60)),"spm",`${a.steps.toLocaleString("en-US")} steps`):tile("Avg cadence","—","",a.type===1||a.type===6?"no step data":"not tracked",true)}
@@ -1132,10 +1137,10 @@ function renderDetail(){
       ${tile("Calories",a.cal,"kcal")}
     </div>
     <div class="grid3">
-      <div class="card"><div class="ch"><h3>Heart rate</h3><span class="meta">${hs?`avg ${hs.avg} · max ${hs.max}`:""}</span></div><div class="chart" id="cHr"></div><p class="note">${!hs?"":a.hrSrc==="gpx"?"From the GPX track, one sample every 5 s.":"Zepp all-day HR, about one sample per minute."}</p></div>
+      <div class="card"><div class="ch"><h3>Heart rate</h3><span class="meta">${hs?`avg ${hs.avg} · max ${hs.max}`:""}</span></div><div class="chart" id="cHr"></div><p class="note">${!hs?"":a.hrSrc==="gpx"?"From the activity track, one sample every 5 s.":"Zepp all-day HR, about one sample per minute."}</p></div>
       <div class="card"><div class="ch"><h3>${t.pace?"Pace":"Speed"}</h3><span class="meta" id="paceMeta"></span></div><div class="chart" id="cPace"></div><p class="note" id="paceNote"></p></div>
       <div class="card"><div class="ch"><h3>HR zones</h3><span class="meta">time in zone</span></div><div id="zones"></div></div>
-      <div class="card"><div class="ch"><h3>Splits per km</h3><span class="meta">${Math.ceil(a.dist/1000-1e-6)} km</span></div><div class="splitwrap" id="splits"></div><p class="note" id="splitNote"></p></div>
+      <div class="card"><div class="ch"><h3>Splits per ${a.splitLen===100?"100 m":"km"}</h3><span class="meta">${a.splitLen===100?`${Math.ceil(a.dist/100-1e-6)} × 100 m`:`${Math.ceil(a.dist/1000-1e-6)} km`}</span></div><div class="splitwrap" id="splits"></div><p class="note" id="splitNote"></p></div>
       <div class="card"><div class="ch"><h3>Route</h3><span class="meta" id="gpsMeta"></span></div><div class="chart" id="cMap"></div><p class="note" id="mapNote"></p></div>
       <div class="card"><div class="ch"><h3>Altitude</h3><span class="meta" id="altMeta"></span></div><div class="chart" id="cAlt"></div></div>
     </div>`;
@@ -1147,22 +1152,22 @@ function renderDetail(){
     const ys=a.pace.map(p=>p[1]);const lo=Math.min(pct(ys,.02),a.avgPace)*0.95,hi=Math.max(pct(ys,.95),a.avgPace)*1.08;
     const pts=a.pace.map(p=>[p[0],Math.min(p[1],hi)]);
     lineChart(cP,{pts,xMax:a.span,yMin:lo,yMax:hi,invert:true,color:"var(--accent)",fmtY:fmtPace,
-      ref:{y:a.avgPace,label:`avg ${fmtPace(a.avgPace)}`},tipFmt:p=>`${Math.floor(p[0]/60)}′${pad(p[0]%60)}″ · ${fmtPace(p[1])} /km`,label:"Pace"});
-    document.getElementById("paceMeta").textContent=`avg ${fmtPace(a.avgPace)} /km`;
-    document.getElementById("paceNote").textContent="From the GPX track, 30 s rolling average. Stops are capped at the chart edge.";
+      ref:{y:a.avgPace,label:`avg ${fmtPace(a.avgPace)}`},tipFmt:p=>`${Math.floor(p[0]/60)}′${pad(p[0]%60)}″ · ${fmtPace(p[1])} ${a.pu}`,label:"Pace"});
+    document.getElementById("paceMeta").textContent=`avg ${fmtPace(a.avgPace)} ${a.pu}`;
+    document.getElementById("paceNote").textContent="From the activity track, 30 s rolling average. Stops are capped at the chart edge.";
   } else if(a.pace){
     const pts=a.pace.map(p=>[p[0],3600/p[1]]);const ys=pts.map(p=>p[1]);
     lineChart(cP,{pts,xMax:a.span,yMin:0,yMax:Math.max(pct(ys,.99),speed)*1.1,color:"var(--z2)",fmtY:v=>v.toFixed(0),
       ref:{y:speed,label:`avg ${speed.toFixed(1)}`},tipFmt:p=>`${Math.floor(p[0]/60)}′ · ${p[1].toFixed(1)} km/h`,label:"Speed"});
     document.getElementById("paceMeta").textContent=`avg ${speed.toFixed(1)} km/h`;
-    document.getElementById("paceNote").textContent="From the GPX track, 30 s rolling average.";
+    document.getElementById("paceNote").textContent="From the activity track, 30 s rolling average.";
   } else if(noDist){
     cP.outerHTML=`<div class="nodata">No distance recorded, so no pace or speed.</div>`;
   } else if(t.pace){
     const lo=(a.bestPace||a.avgPace)*0.9,hi=a.avgPace*1.15;
     lineChart(cP,{pts:[[0,a.avgPace],[a.dur,a.avgPace]],xMax:a.dur,yMin:lo,yMax:hi,invert:true,color:"var(--accent)",fmtY:fmtPace,
       ref:a.bestPace?{y:a.bestPace,label:`best ${fmtPace(a.bestPace)}`}:null,label:"Average pace"});
-    document.getElementById("paceMeta").textContent=`avg ${fmtPace(a.avgPace)} /km`;
+    document.getElementById("paceMeta").textContent=`avg ${fmtPace(a.avgPace)} ${a.pu}`;
     document.getElementById("paceNote").textContent="The Zepp export has no pace stream, only average and best pace.";
   } else {
     const best=a.bestPace?3600/a.bestPace:speed*1.2;
@@ -1215,8 +1220,8 @@ function renderDetail(){
   if(noDist){document.getElementById("splits").innerHTML=`<div class="nodata">No distance recorded.</div>`;return}
   const sp=splits(a);const hmax=Math.max(...sp.map(r=>r.hr||0),1),hmin=Math.min(...sp.filter(r=>r.hr).map(r=>r.hr),hmax),hlo=Math.max(40,hmin-15);
   const est=!a.dstream;
-  document.getElementById("splits").innerHTML=`<table class="splits"><thead><tr><th>Km</th><th>Pace /km</th><th>Time</th><th>Avg HR</th></tr></thead><tbody>`+
-    sp.map(r=>`<tr><td>${r.seg<999.5?(r.seg/1000).toFixed(2):r.k}</td><td>${est?"~":""}${fmtPace(r.pace)}</td><td>${fmtDur(r.time)}</td>
+  document.getElementById("splits").innerHTML=`<table class="splits"><thead><tr><th>${a.splitLen===100?"m":"Km"}</th><th>Pace ${a.pu}</th><th>Time</th><th>Avg HR</th></tr></thead><tbody>`+
+    sp.map(r=>`<tr><td>${a.splitLen===100?Math.round((r.k-1)*100+r.seg):(r.seg<999.5?(r.seg/1000).toFixed(2):r.k)}</td><td>${est?"~":""}${fmtPace(r.pace)}</td><td>${fmtDur(r.time)}</td>
       <td class="hrc">${r.hr?`<span class="sbar" title="${zoneOf(r.hr).n}"><i style="width:${Math.max(6,(r.hr-hlo)/((hmax-hlo)||1)*100).toFixed(1)}%;background:${zoneOf(r.hr).c}"></i></span><span class="hrv">${r.hr}</span>`:"—"}</td></tr>`).join("")+`</tbody></table>`;
   document.getElementById("splitNote").textContent=est?"~ Pace per km is the activity average; Zepp has no per-km distance. HR is the mean of samples inside each km's time window.":"";
 }
@@ -1239,7 +1244,7 @@ function attachGpx(a,g){
   for(let i=1;i<n;i++){
     while(j<i&&g.t[i]-g.t[j]>30)j++;
     const k=Math.max(0,j-1),dt=g.t[i]-g.t[k],dd=g.d[i]-g.d[k];
-    if(dt>=10&&dd>3){const p=dt/(dd/1000);if(p<1500)P.push([g.t[i],p])}
+    if(dt>=10&&dd>3){const p=dt/(dd/1000);if(p<(a.type===20?6000:1500))P.push([g.t[i],p*a.splitLen/1000])}
   }
   a.pace=P.length>5?P:null;
 }
