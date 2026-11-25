@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strava Query</title>
+<style>
+  :root{--bg:#f6f6f4;--card:#fff;--ink:#1d1d1b;--mute:#6b6b66;--line:#e4e4df;--accent:#fc4c02;--ok:#1f8a4c;--warn:#b54708;}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;padding:16px 24px;background:var(--card);border-bottom:1px solid var(--line)}
+  h1{font-size:18px;margin:0}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button,select,input{font:inherit;padding:7px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+  button{cursor:pointer}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button:disabled{opacity:.5;cursor:default}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600}
+  .badge.ro{background:#e6f4ea;color:var(--ok)}
+  .badge.rw{background:#fdecdc;color:var(--warn)}
+  .scope{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--mute)}
+  main{padding:20px 24px}
+  #status{margin:0 0 12px;color:var(--mute);min-height:20px}
+  #status.err{color:#c0262d}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px}
+  .stat b{display:block;font-size:20px}
+  .stat span{color:var(--mute);font-size:12px}
+  .tablewrap{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:70vh}
+  table{border-collapse:collapse;width:100%;white-space:nowrap}
+  th,td{padding:8px 12px;border-bottom:1px solid var(--line);text-align:left}
+  th{position:sticky;top:0;background:#fafaf8;cursor:pointer;user-select:none;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.03em}
+  th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+  th.sorted::after{content:" ▾"}
+  th.sorted.asc::after{content:" ▴"}
+  tr:hover td{background:#fbfaf7}
+  td a{color:var(--accent);text-decoration:none}
+  td.name{max-width:320px;overflow:hidden;text-overflow:ellipsis}
+  .hidden{display:none}
+  .connect{max-width:560px;margin:60px auto;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:28px;text-align:center}
+  .connect p{color:var(--mute)}
+  footer{padding:16px 24px;color:var(--mute);font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <h1>Strava Aktivitelerim</h1>
+    <span id="who" class="scope"></span>
+  </div>
+  <div class="row">
+    <span id="accessBadge" class="badge hidden"></span>
+    <span id="scopeText" class="scope"></span>
+    <button id="btnRefresh" class="hidden">Aktiviteleri yenile</button>
+    <button id="btnCsv" class="hidden">CSV indir</button>
+    <button id="btnLogout" class="hidden">Bağlantıyı kes</button>
+  </div>
+</header>
+
+<main>
+  <div id="connectBox" class="connect hidden">
+    <p>Aktivitelerini listelemek için Strava hesabına bağlan.<br>
+       İstenen yetki: <span class="scope">read, activity:read_all</span> (salt okunur)</p>
+    <button id="btnConnect" class="primary">Strava ile bağlan</button>
+  </div>
+
+  <p id="status"></p>
+
+  <div id="dataBox" class="hidden">
+    <div class="stats" id="stats"></div>
+    <div class="row" style="margin-bottom:12px">
+      <input id="q" type="search" placeholder="Ada göre ara…" style="min-width:220px">
+      <select id="fType"><option value="">Tüm türler</option></select>
+      <select id="fYear"><option value="">Tüm yıllar</option></select>
+      <span id="countText" class="scope"></span>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr id="thead"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+<footer>Veriler Strava API üzerinden alınır. Yalnızca bu tarayıcıda saklanır.</footer>
+
+<script>
+// ---- Ayarlar ----
+// Client ID ve Secret Cloudflare Worker'da (strava-token) saklanır; bu sayfada yoktur.
+const TOKEN_PROXY = "https://strava-token.yanniers.workers.dev";
+const REQUESTED_SCOPE = "read,activity:read_all";
+const WRITE_SCOPES = ["activity:write", "profile:write"];
+const LS_TOK = "strava_tokens_v1", LS_ACT = "strava_activities_v1";
+
+// ---- Yardımcılar ----
+const $ = id => document.getElementById(id);
+const redirectUri = () => location.origin + location.pathname;
+function lsGet(k){ try{ return JSON.parse(localStorage.getItem(k)); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){ console.warn("localStorage yazılamadı", e); } }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+function status(msg, err=false){ const s=$("status"); s.textContent=msg||""; s.className=err?"err":""; }
+const show = (id, on=true) => $(id).classList.toggle("hidden", !on);
+
+const PACE_TYPES = new Set(["Run","TrailRun","VirtualRun","Walk","Hike"]);
+function hms(sec){ if(sec==null) return ""; sec=Math.round(sec); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60; return (h? h+":"+String(m).padStart(2,"0") : m) + ":" + String(s).padStart(2,"0"); }
+function paceOrSpeed(a){
+  if(!a.average_speed) return "";
+  if(PACE_TYPES.has(a.sport_type)){ const p=1000/a.average_speed; return Math.floor(p/60)+":"+String(Math.round(p%60)).padStart(2,"0")+" /km"; }
+  return (a.average_speed*3.6).toFixed(1)+" km/sa";
+}
+const fmt1 = n => n==null ? "" : n.toLocaleString("tr-TR",{minimumFractionDigits:1, maximumFractionDigits:1});
+const fmt0 = n => n==null ? "" : Math.round(n).toLocaleString("tr-TR");
+
+// ---- Yetki rozeti ----
+function renderAccess(tok){
+  const scopes = (tok.scope||"").split(",").filter(Boolean);
+  const isWrite = scopes.some(s => WRITE_SCOPES.includes(s));
+  const b = $("accessBadge");
+  b.textContent = isWrite ? "Okuma-yazma" : "Salt okunur";
+  b.className = "badge " + (isWrite ? "rw" : "ro");
+  $("scopeText").textContent = "scope: " + (scopes.join(", ") || "?");
+  if(tok.athlete) $("who").textContent = [tok.athlete.firstname, tok.athlete.lastname].filter(Boolean).join(" ");
+  if(!scopes.includes("activity:read_all")) status("Uyarı: activity:read_all izni verilmemiş; gizli aktiviteler listelenmeyecek. Bağlanırken tüm kutuları işaretle.", true);
+}
+
+// ---- OAuth ----
+async function getClientId(){
+  const r = await fetch(TOKEN_PROXY + "/config");
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok || !j.client_id) throw new Error("Worker yapılandırması okunamadı ("+r.status+"): "+(j.message||"client_id yok"));
+  return j.client_id;
+}
+async function connect(){
+  let CLIENT_ID;
+  try{ CLIENT_ID = await getClientId(); }catch(e){ status(e.message, true); return; }
+  const u = new URL("https://www.strava.com/oauth/authorize");
+  u.search = new URLSearchParams({client_id:CLIENT_ID, response_type:"code", redirect_uri:redirectUri(), approval_prompt:"auto", scope:REQUESTED_SCOPE});
+  location.href = u.toString();
+}
+async function tokenRequest(params){
+  const r = await fetch(TOKEN_PROXY + "/token", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(params)
+  });
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error("Token hatası ("+r.status+"): "+(j.message||JSON.stringify(j)));
+  return j;
+}
+async function exchangeCode(code, grantedScope){
+  const j = await tokenRequest({code, grant_type:"authorization_code"});
+  const tok = {access_token:j.access_token, refresh_token:j.refresh_token, expires_at:j.expires_at, athlete:j.athlete, scope:grantedScope};
+  lsSet(LS_TOK, tok);
+  return tok;
+}
+async function getAccessToken(){
+  let tok = lsGet(LS_TOK);
+  if(!tok) throw new Error("Bağlı değil");
+  if(tok.expires_at*1000 < Date.now()+60000){
+    const j = await tokenRequest({grant_type:"refresh_token", refresh_token:tok.refresh_token});
+    tok = {...tok, access_token:j.access_token, refresh_token:j.refresh_token, expires_at:j.expires_at};
+    lsSet(LS_TOK, tok);
+  }
+  return tok.access_token;
+}
+async function logout(){
+  const tok = lsGet(LS_TOK);
+  if(tok){ try{ await fetch("https://www.strava.com/oauth/deauthorize", {method:"POST", headers:{Authorization:"Bearer "+await getAccessToken()}}); }catch(e){} }
+  lsDel(LS_TOK); lsDel(LS_ACT);
+  location.replace(redirectUri());
+}
+
+// ---- Aktiviteleri çek ----
+async function fetchAll(){
+  $("btnRefresh").disabled = true;
+  const all = [];
+  try{
+    for(let page=1; ; page++){
+      status(`Aktiviteler alınıyor… sayfa ${page} (${all.length} aktivite)`);
+      const r = await fetch(`https://www.strava.com/api/v3/athlete/activities?per_page=200&page=${page}`, {headers:{Authorization:"Bearer "+await getAccessToken()}});
+      if(r.status===429) throw new Error("Strava istek limiti aşıldı (429). 15 dakika sonra tekrar dene.");
+      if(!r.ok) throw new Error("API hatası ("+r.status+"): "+await r.text());
+      const batch = await r.json();
+      if(!batch.length) break;
+      all.push(...batch.map(slim));
+    }
+    lsSet(LS_ACT, {fetched_at:Date.now(), items:all});
+    status(`${all.length} aktivite yüklendi.`);
+    render(all);
+  }catch(e){ status(e.message, true); }
+  finally{ $("btnRefresh").disabled = false; }
+}
+function slim(a){
+  return {id:a.id, name:a.name, sport_type:a.sport_type||a.type, start_date_local:a.start_date_local,
+    distance:a.distance, moving_time:a.moving_time, elapsed_time:a.elapsed_time,
+    total_elevation_gain:a.total_elevation_gain, average_speed:a.average_speed,
+    average_heartrate:a.average_heartrate, max_heartrate:a.max_heartrate,
+    average_watts:a.average_watts, kudos_count:a.kudos_count, private:a.private};
+}
+
+// ---- Tablo ----
+const COLS = [
+  {k:"start_date_local", t:"Tarih", v:a=>a.start_date_local, f:a=>a.start_date_local.slice(0,16).replace("T"," ")},
+  {k:"name", t:"Ad", v:a=>a.name.toLowerCase(), f:a=>`<a href="https://www.strava.com/activities/${a.id}" target="_blank" rel="noopener">${esc(a.name)}</a>${a.private?" 🔒":""}`, cls:"name"},
+  {k:"sport_type", t:"Tür", v:a=>a.sport_type, f:a=>a.sport_type},
+  {k:"distance", t:"Mesafe (km)", v:a=>a.distance, f:a=>a.distance?fmt1(a.distance/1000):"", num:1},
+  {k:"moving_time", t:"Hareket süresi", v:a=>a.moving_time, f:a=>hms(a.moving_time), num:1},
+  {k:"elapsed_time", t:"Toplam süre", v:a=>a.elapsed_time, f:a=>hms(a.elapsed_time), num:1},
+  {k:"average_speed", t:"Tempo / Hız", v:a=>a.average_speed, f:paceOrSpeed, num:1},
+  {k:"total_elevation_gain", t:"Tırmanış (m)", v:a=>a.total_elevation_gain, f:a=>fmt0(a.total_elevation_gain), num:1},
+  {k:"average_heartrate", t:"Ort. NB", v:a=>a.average_heartrate, f:a=>fmt0(a.average_heartrate), num:1},
+  {k:"max_heartrate", t:"Maks. NB", v:a=>a.max_heartrate, f:a=>fmt0(a.max_heartrate), num:1},
+  {k:"average_watts", t:"Ort. Watt", v:a=>a.average_watts, f:a=>fmt0(a.average_watts), num:1},
+  {k:"kudos_count", t:"Kudos", v:a=>a.kudos_count, f:a=>a.kudos_count??"", num:1},
+];
+let DATA = [], sortKey = "start_date_local", sortAsc = false;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function render(items){
+  DATA = items;
+  show("dataBox"); show("btnCsv"); show("btnRefresh");
+  const types = [...new Set(items.map(a=>a.sport_type))].sort();
+  const years = [...new Set(items.map(a=>a.start_date_local.slice(0,4)))].sort().reverse();
+  $("fType").innerHTML = '<option value="">Tüm türler</option>' + types.map(t=>`<option>${esc(t)}</option>`).join("");
+  $("fYear").innerHTML = '<option value="">Tüm yıllar</option>' + years.map(y=>`<option>${y}</option>`).join("");
+  $("thead").innerHTML = COLS.map(c=>`<th data-k="${c.k}" class="${c.num?"num":""}">${c.t}</th>`).join("");
+  draw();
+}
+function filtered(){
+  const q = $("q").value.trim().toLowerCase(), t = $("fType").value, y = $("fYear").value;
+  const col = COLS.find(c=>c.k===sortKey);
+  return DATA.filter(a => (!q || a.name.toLowerCase().includes(q)) && (!t || a.sport_type===t) && (!y || a.start_date_local.startsWith(y)))
+    .sort((a,b)=>{ const x=col.v(a), z=col.v(b); if(x==null) return 1; if(z==null) return -1; return (x<z?-1:x>z?1:0)*(sortAsc?1:-1); });
+}
+function draw(){
+  const rows = filtered();
+  document.querySelectorAll("th").forEach(th=>{ th.classList.toggle("sorted", th.dataset.k===sortKey); th.classList.toggle("asc", th.dataset.k===sortKey && sortAsc); });
+  $("tbody").innerHTML = rows.map(a=>"<tr>"+COLS.map(c=>`<td class="${c.num?"num":""} ${c.cls||""}">${c.f(a)}</td>`).join("")+"</tr>").join("");
+  $("countText").textContent = `${rows.length} / ${DATA.length} aktivite`;
+  const sum = k => rows.reduce((s,a)=>s+(a[k]||0),0);
+  $("stats").innerHTML = [
+    [rows.length.toLocaleString("tr-TR"), "Aktivite"],
+    [fmt1(sum("distance")/1000)+" km", "Toplam mesafe"],
+    [hms(sum("moving_time")), "Hareket süresi (sa:dk:sn)"],
+    [fmt0(sum("total_elevation_gain"))+" m", "Toplam tırmanış"],
+  ].map(([b,s])=>`<div class="stat"><b>${b}</b><span>${s}</span></div>`).join("");
+}
+function downloadCsv(){
+  const keys = ["id","start_date_local","name","sport_type","distance","moving_time","elapsed_time","total_elevation_gain","average_speed","average_heartrate","max_heartrate","average_watts","kudos_count","private"];
+  const q = v => v==null ? "" : /[",;\n]/.test(String(v)) ? '"'+String(v).replace(/"/g,'""')+'"' : String(v);
+  const csv = [keys.join(",")].concat(filtered().map(a=>keys.map(k=>q(a[k])).join(","))).join("\n");
+  const url = URL.createObjectURL(new Blob(["﻿"+csv], {type:"text/csv;charset=utf-8"}));
+  const l = document.createElement("a"); l.href=url; l.download="strava-aktiviteler.csv"; l.click(); URL.revokeObjectURL(url);
+}
+
+// ---- Olaylar ----
+$("btnConnect").onclick = connect;
+$("btnRefresh").onclick = fetchAll;
+$("btnLogout").onclick = logout;
+$("btnCsv").onclick = downloadCsv;
+["q","fType","fYear"].forEach(id => $(id).addEventListener("input", draw));
+$("thead").addEventListener("click", e=>{ const k=e.target.dataset.k; if(!k) return; if(k===sortKey) sortAsc=!sortAsc; else { sortKey=k; sortAsc=false; } draw(); });
+
+// ---- Başlangıç ----
+(async function init(){
+  if(location.protocol === "file:"){
+    status("Bu sayfa file:// ile açılmış. Strava geri yönlendirmesi için http://localhost üzerinden aç (ör. python3 -m http.server 8000).", true);
+  }
+  const p = new URLSearchParams(location.search);
+  if(p.get("error")){ status("Strava yetkisi reddedildi: "+p.get("error"), true); history.replaceState(null,"",redirectUri()); }
+  if(p.get("code")){
+    try{
+      status("Strava'dan token alınıyor…");
+      await exchangeCode(p.get("code"), p.get("scope")||"");
+      history.replaceState(null,"",redirectUri());
+    }catch(e){ status(e.message, true); }
+  }
+  const tok = lsGet(LS_TOK);
+  if(!tok){ show("connectBox"); return; }
+  show("accessBadge"); show("btnLogout");
+  renderAccess(tok);
+  const cache = lsGet(LS_ACT);
+  if(cache && cache.items){ render(cache.items); if(!$("status").classList.contains("err")) status(`${cache.items.length} aktivite (önbellek: ${new Date(cache.fetched_at).toLocaleString("tr-TR")}). Güncellemek için "Aktiviteleri yenile".`); }
+  else await fetchAll();
+})();
+</script>
+</body>
+</html>
